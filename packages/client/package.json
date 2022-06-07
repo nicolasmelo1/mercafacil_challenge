@@ -1,0 +1,22 @@
+{
+  "name": "client",
+  "version": "0.0.0",
+  "description": "monorepo for the client of mercafacil challenge",
+  "main": "index.js",
+  "scripts": {
+      "uninstall:web": "npm uninstall --prefix web",
+      "uninstall:mobile": "npm uninstall --prefix mobile",
+      "install:web": "npm install --prefix web",
+      "install:mobile": "npm install --prefix mobile",
+      "web:dev": "npm run dev --prefix web",
+      "web:build": "npm run build --prefix web",
+      "web:start": "npm run start --prefix web",
+      "mobile:start": "npm run start --prefix mobile"
+  },
+  "keywords": [
+    "mercafacil",
+    "client"
+  ],
+  "author": "Nicolas Melo",
+  "license": "MIT"
+}

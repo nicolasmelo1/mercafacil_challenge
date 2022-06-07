@@ -1,0 +1,27 @@
+{
+    "name": "server",
+    "version": "0.0.1",
+    "description": "\"The server of mercafacil challenge. It is a customized express App that will feel like home for django developers\"",
+    "main": "manage.js",
+    "scripts": {
+        "dev": "npm run docker:dev && node manage.js runserver",
+        "docker:dev": "docker compose up -d",
+        "makemigrations": "node manage.js makemigrations",
+        "migrate": "npm run docker:dev && node manage.js migrate",
+        "test": "node teste.js",
+        "stop": "docker compose stop",
+        "docs": "./node_modules/jsdoc/jsdoc.js -c ./.jsdoc.conf.json"
+    },
+    "keywords": [
+        "reglow",
+        "server"
+    ],
+    "author": "Nicolas Leal",
+    "license": "ISC",
+    "dependencies": {
+        "compression": "^1.7.4",
+        "express": "^4.17.2",
+        "helmet": "^4.6.0",
+        "jsonwebtoken": "^8.5.1"
+    }
+}
