@@ -22,32 +22,37 @@ const logger = require('../../../logging')
  * 
  * @param {*} settings 
  */
- async function getStateAndOriginalModels(settings) {
-    let { engineInstance, models: originalModels } = initialize(settings, [PalmaresMigrations])
+async function getStateAndOriginalModels(settings) {
+    let initializedDatabases = await initialize(settings, [PalmaresMigrations])
+    let initializedEngineInstances = []
+    const databases = Object.values(initializedDatabases)
+    for (const { engineInstance, models: originalModels } of databases) {
+        const originalModelsByModelName = {}
+        const appNameByModelName = {}
+        // automatically generate the models and then define it so we can compare.
+        const stateModels = getState(settings, engineInstance.databaseIdName)
+        
+        const stateModelsByModelName = initializedStateModelsByModelName(stateModels, engineInstance)
+        Object.keys(stateModelsByModelName).forEach(stateModelName => {
+            stateModelsByModelName[stateModelName] = stateModelsByModelName[stateModelName].original
+            appNameByModelName[stateModelName] = stateModels[stateModelName].appName
+        })
 
-    const originalModelsByModelName = {}
-    const appNameByModelName = {}
-    // automatically generate the models and then define it so we can compare.
-    const stateModels = getState(settings)
-    
-    const stateModelsByModelName = initializedStateModelsByModelName(stateModels, engineInstance)
-    Object.keys(stateModelsByModelName).forEach(stateModelName => {
-        stateModelsByModelName[stateModelName] = stateModelsByModelName[stateModelName].original
-        appNameByModelName[stateModelName] = stateModels[stateModelName].appName
-    })
-
-
-    originalModels.forEach(({original, appName}) => {
-        originalModelsByModelName[original.constructor.name] = original
-        appNameByModelName[original.constructor.name] = appName
-    })
-    
-    return {
-        engineInstance,
-        stateModelsByModelName,
-        originalModelsByModelName,
-        appNameByModelName
+        originalModels.forEach(({original, appName}) => {
+            originalModelsByModelName[original.constructor.name] = original
+            appNameByModelName[original.constructor.name] = appName
+        })
+        
+        const initializedEngineInstanceData = {
+            engineInstance,
+            stateModelsByModelName,
+            originalModelsByModelName,
+            appNameByModelName
+        }
+        initializedEngineInstances.push(initializedEngineInstanceData)
     }
+    
+    return initializedEngineInstances
 }
 
 /**
@@ -60,19 +65,19 @@ const logger = require('../../../logging')
  * Django offers a per app ordering, which can be helpful working on a single app but easy to lose track on large projects.
  */
 async function makemigrations(settings) {
-    const {
-        engineInstance,
-        stateModelsByModelName,
-        originalModelsByModelName,
-        appNameByModelName
-    } = await getStateAndOriginalModels(settings)
-    const differenceList = await getDifference(appNameByModelName, originalModelsByModelName, stateModelsByModelName)
-
-    const orderedDifferenceList = reorderDifferences(originalModelsByModelName, stateModelsByModelName, differenceList)
-    if (orderedDifferenceList.length === 0) {
-        logger.INFO.NO_MIGRATION()
-    } else {
-        generateFiles(engineInstance.engineName, settings, orderedDifferenceList)
+    const initializedEngineInstances = await getStateAndOriginalModels(settings)
+    for (
+        const { 
+            engineInstance, stateModelsByModelName, originalModelsByModelName, appNameByModelName
+        } of initializedEngineInstances
+    ) {
+        const differenceList = await getDifference(appNameByModelName, originalModelsByModelName, stateModelsByModelName)
+        const orderedDifferenceList = reorderDifferences(originalModelsByModelName, stateModelsByModelName, differenceList)
+        if (orderedDifferenceList.length === 0) {
+            logger.INFO.NO_MIGRATION()
+        } else {
+            generateFiles(engineInstance, settings, orderedDifferenceList)
+        }
     }
 }
 

@@ -15,7 +15,7 @@ const logging = require('../../logging')
  */
 class SequelizeEngine extends Engine {
     engineName = 'SequelizeEngine'
-
+    
     #isConnected = false
     #relatedFieldsToEvaluate = []
     definedModels = {}
@@ -30,10 +30,9 @@ class SequelizeEngine extends Engine {
      * 
      * @param {*} param
      */
-    constructor({engine, databaseName, url=null, username=null, password=null, host=null, port=null, extraOptions={}}) {
-        super({})
+    constructor({engine, databaseIdName, databaseName, url=null, username=null, password=null, host=null, port=null, extraOptions={}}) {
+        super({databaseIdName})
         if (![null, '', undefined].includes(url)) {
-
             this.engineInstance = new Sequelize(url)
         } else if (['mysql', 'mariadb', 'postgres', 'mssql'].includes(engine)) {
             this.engineInstance = new Sequelize(databaseName, username, password, {
@@ -92,17 +91,18 @@ class SequelizeEngine extends Engine {
      * Otherwise we will continue also but we will show a warning.
      */
     async testConnection() {
-        if (this.engineInstance !== null)
-        try {
-            await this.engineInstance.authenticate()
-            this.#isConnected = true
-        } catch (error) {
-            this.#isConnected = false
-        }
+        if (this.engineInstance !== null) {
+            try {
+                await this.engineInstance.authenticate()
+                this.#isConnected = true
+            } catch (error) {
+                this.#isConnected = false
+            }
 
-        if (!this.#isConnected) {
-            this.engineInstance = null
-            logging.WARN.CANNOT_CONNECT_TO_DATABASE()
+            if (this.#isConnected === false) {
+                this.engineInstance = null
+                logging.WARN.CANNOT_CONNECT_TO_DATABASE()
+            }
         }
     }
 
@@ -118,11 +118,13 @@ class SequelizeEngine extends Engine {
     async close() {
         if (this.engineInstance !== null) await this.engineInstance.connectionManager.close()
     }
+
     /**
      * translates the OnDelete operations to something that sequelize can understand.
      * 
-     * @param {*} onDeleteAttribute 
-     * @returns {String}
+     * @param {string} onDeleteAttribute - Check the '../models/fiels' ON_DELETE constant for the options available.
+     * 
+     * @returns {string} - The translated on delete operation.
      */
     #translateOnDeleteOperations = (onDeleteAttribute) => {
         switch (onDeleteAttribute) {
@@ -187,7 +189,7 @@ class SequelizeEngine extends Engine {
         })
         return translatedAttributes
     }
-        
+
     /**
      * Translate the Field attribute to something that the engine (sequelize here) can understand and comprehend.
      * Not all of the default attributes might be supported for all engines and that's actually fine.

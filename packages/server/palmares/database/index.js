@@ -107,6 +107,7 @@
 const { SequelizeEngine } = require('./engines')
 
 const { retrieveModels } = require('./helpers')
+const { doesModuleExist } = require('../utils')
 const models = require('./models')
 const logger = require('../logging')
 
@@ -136,39 +137,55 @@ let engineInstance = null
  * }>} - Returns a promise with the engine instance and the models loaded.
  */
 async function initialize(settings, internalModels=[]) {
-    engineInstance = new SequelizeEngine(settings.DATABASE)
-    await engineInstance.testConnection()
+    const doesDatabaseSettingsExists = typeof settings.DATABASE === 'object' && 
+        ![null, undefined].includes(settings.DATABASE)
+    let engineInstances = {}
+    if (doesDatabaseSettingsExists) {
+        const databases = Object.entries(settings.DATABASE)
+        
+        for (const [databaseName, databaseConf] of databases) {
+            const engineInstance = new SequelizeEngine({
+                databaseIdName: databaseName, ...databaseConf
+            })
+            await engineInstance.testConnection()
+            if (engineInstance.isConnected()) {
+                logger.INFO.LOADING_DATABASE(databaseName)
 
-    if (engineInstance.isConnected()) {
-        logger.INFO.LOADING_DATABASE()
+                const allModelsInApplication = retrieveModels(settings)
+                const loadedModels = []
+                for (const module of allModelsInApplication) {
+                    const modelInstance = new module.model()
+                    const initializedModel = modelInstance.initialize(module.model, engineInstance)
+                    const wasModelInitializedForDatabase = initializedModel !== null
+                    if (wasModelInitializedForDatabase) {
+                        const loadedModelData = {
+                            appName: module.appName,
+                            original: modelInstance,
+                            initialized: initializedModel
+                        }
+                        loadedModels.push(loadedModelData)
+                    }
+                }
+                const loadedInternalModels = internalModels.map(modelClass => {
+                    const model = new modelClass()
+                    model.options.databases = [engineInstance.databaseIdName]
+                    const initializedModel = model.initialize(modelClass, engineInstance)
+                    return {
+                        original: model,
+                        initialized: initializedModel
+                    }
+                })
 
-        let loadedModels = retrieveModels(settings)
-        loadedModels = loadedModels.map(module => {
-            const model = new module.model()
-            const initializedModel = model.initialize(module.model, engineInstance)
-            return {
-                appName: module.appName,
-                original: model,
-                initialized: initializedModel
+                logger.INFO.LOADED_DATABASE(databaseName)
+                engineInstances[databaseName] = {
+                    engineInstance,
+                    models: loadedModels,
+                    internalModels: loadedInternalModels
+                }
             }
-        })
-
-        internalModels = internalModels.map(modelClass => {
-            const model = new modelClass()
-            const initializedModel = model.initialize(modelClass, engineInstance)
-            return {
-                original: model,
-                initialized: initializedModel
-            }
-        })
-
-        logger.INFO.LOADED_DATABASE()
-        return {
-            engineInstance,
-            models: loadedModels,
-            internalModels: internalModels
         }
     }
+    return engineInstances
 }
 
 async function close() {

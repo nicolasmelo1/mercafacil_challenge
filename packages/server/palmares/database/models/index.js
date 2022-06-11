@@ -3,7 +3,7 @@
 const fields = require('./fields')
 
 class AbstractModelClassError extends Error {}
-
+class InvalidDatabaseError extends Error {}
 
 /**
  * Retrieve the instance managers from the instance.
@@ -14,18 +14,18 @@ class AbstractModelClassError extends Error {}
 function retrieveManagers(instance) {
     let managers = {}
 
-    Object.keys(instance).forEach(key => {
-        const isInstanceKeyAnManager = instance[key] instanceof Manager
+    for (keyOfInstance of Object.keys(instance)) {
+        const isInstanceKeyAnManager = instance[keyOfInstance] instanceof Manager
         if (isInstanceKeyAnManager) {
-            managers[key] = instance[key]
+            managers[keyOfInstance] = instance[keyOfInstance]
         }
-    })
+    }
 
-    Object.keys(instance.constructor).forEach(key => {
-        if (instance.constructor[key] instanceof Manager) {
-            managers[key] = instance.constructor[key]
+    for (keyOfInstanceConstructor of Object.keys(instance.constructor)) {
+        if (instance.constructor[keyOfInstanceConstructor] instanceof Manager) {
+            managers[keyOfInstanceConstructor] = instance.constructor[keyOfInstanceConstructor]
         }
-    })
+    }
     return managers
 }
 
@@ -35,7 +35,7 @@ function retrieveManagers(instance) {
  * because the `attributes = {}` object from the child class will overwrite the `attributes` of the parent class
  * because of this what we do is define a `abstracts` class in the children
  */
-const handleAbstracts = (Model, instance) => {
+function handleAbstracts(Model, instance) {
     const composeAbstract = (abstractClass, definedAbstracts=[]) => {
         if (definedAbstracts.includes(abstractClass.name)) {
             throw new AbstractModelClassError(`The defined abstract '${abstractClass.name}' is circular, please check it again and make sure you don't define circular abstract.`)
@@ -91,27 +91,46 @@ const handleAbstracts = (Model, instance) => {
  */
 class Manager {
     constructor() {
-        this.engineInstance = null
-        this.instance = null
+        this.engineInstances = {}
+        this.instances = {}
     }
     
     /**
+     * Returns the instance so you can make queries on it.
+     * 
      * @returns {import('sequelize').Model}
      */
-    getInstance() {
-        if (this.instance !== null) {
-            return this.instance
+    getInstance(databaseName=undefined) {
+        const isDatabaseNameDefinedOrDoesNotHaveDatabasesDefined = typeof databaseName === 'string' || 
+            this.options.databases.length === 0
+        const databaseNameToFetch = isDatabaseNameDefinedOrDoesNotHaveDatabasesDefined ? 
+            databaseName : this.options.databases[0]
+        const wasDatabaseInitialized = ![null, undefined].includes(this.instances[databaseNameToFetch])
+
+        if (wasDatabaseInitialized) {
+            return this.instances[databaseNameToFetch]
         } else {
-            throw new Error('Manager instance is not initialized.')
+            throw new Error(`Manager instance for ${databaseNameToFetch} is not initialized.`)
         }
     }
 
     /**
+     * Sometimes we need to retrieve the engine instance itself appended to this particular manager instance.
+     * To do this we use this function.
+     * 
+     * @param {string | undefined} databaseName - The name of the database to retrieve the engine instance from.
+     * We can have multiple databases inside of the application.
+     * 
      * @returns {import('../engines/sequelize')}
      */
-    getEngineInstance() {
-        if (this.engineInstance !== null) {
-            return this.engineInstance
+    getEngineInstance(databaseName=undefined) {
+        const isDatabaseNameDefinedOrDoesNotHaveDatabasesDefined = typeof databaseName === 'string' || 
+            this.options.databases.length === 0
+        const databaseNameToFetch = isDatabaseNameDefinedOrDoesNotHaveDatabasesDefined ? 
+            databaseName : this.options.databases[0]
+        const wasEngineInstanceInitialized = ![null, undefined].includes(this.engineInstance[databaseNameToFetch])
+        if (wasEngineInstanceInitialized) {
+            return this.engineInstance[databaseNameToFetch]
         } else {
             throw new Error('Manager engine instance is not initialized.')
         }
@@ -155,9 +174,9 @@ class Manager {
  *      lastName: {
  *          type: DataTypes.STRING
  *      }
- *}, {
+ * }, {
  *      tableName: 'user'    
- })
+ * })
  *
  * Notice that 'User' is the name of the model, the second argument of the `.define()` function is the attributes,
  * it is exactly this object we will put in the attributes parameter. The second argument of the function is the
@@ -222,6 +241,8 @@ class Model {
     options = {}
 
     attributes = {}
+    
+    static instances = {}
 
     static _defaultOptions = {
         autoId: true,
@@ -232,7 +253,28 @@ class Model {
         managed: true,
         ordering: [],
         indexes: [],
+        databases: ['default'],
         customOptions: {}
+    }
+
+    /**
+     * Retrieves the database instance for the model. We retrieve the instance by the name of the database.
+     * If you want to retrieve the instance from another database you need to pass the database name as the parameter.
+     * 
+     * @param {string} databaseName - The name of the database of the instance you want to retrieve.
+     */
+    getInstance(databaseName=undefined) {
+        const isDatabaseNameDefinedOrDoesNotHaveDatabasesDefined = typeof databaseName === 'string' || this.options.databases.length === 0
+        databaseName = isDatabaseNameDefinedOrDoesNotHaveDatabasesDefined ? databaseName : this.options.databases[0]
+
+        const doesInstancesExistForDatabaseName = typeof this.constructor.instances === 'object' &&
+            ![null, undefined].includes(this.constructor.instances) &&
+            ![null, undefined].includes(this.constructor.instances[databaseName])
+        if (doesInstancesExistForDatabaseName) {
+            return this.constructor.instances[databaseName]
+        } else {
+            throw new InvalidDatabaseError(`Database ${databaseName} does not exist.`)
+        }
     }
 
     /**
@@ -244,7 +286,8 @@ class Model {
     #initializeAttributes() {
         for (const attributeName of Object.keys(this.attributes)) {
             this.attributes[attributeName].attributeName = attributeName
-            this.attributes[attributeName].underscored = this.options.underscored !== undefined ? this.options.underscored : this.attributes[attributeName].underscored
+            this.attributes[attributeName].underscored = this.options.underscored !== undefined ? 
+                this.options.underscored : this.attributes[attributeName].underscored
             this.attributes[attributeName].initialize()
         }
     }
@@ -265,9 +308,42 @@ class Model {
     }
 
     /**
+     * Initializes the managers from the model so we can do queries through them instead of making
+     * queries inside of the code.
+     * 
+     * @param {Model} modelClass - The model class to initialize the managers from.
+     * @param {import('../engines/engine').Engine} engineInstance - An engine instance object.
+     */
+    #initializeManagers(modelClass, engineInstance) {
+        const databaseIdName = engineInstance.databaseIdName
+        const managers = retrieveManagers(this)
+        const areManagersDefined = typeof managers === 'object' && ![null, undefined].includes(managers)
+        if (areManagersDefined) {
+            for (const [managerName, manager] of Object.entries(managers)) {
+                const isManagerAlreadyDefinedForModel = modelClass[managerName] instanceof Manager
+                const instance = modelClass.instances[databaseIdName]
+                if (isManagerAlreadyDefinedForModel) {
+                    const existingManager = modelClass[managerName]
+                    existingManager.instances[databaseIdName] = instance
+                    existingManager.engineInstances[databaseIdName] = engineInstance
+                } else {
+                    manager.instances[databaseIdName] = instance
+                    manager.engineInstances[databaseIdName] = engineInstance
+                    modelClass[managerName] = manager
+                }
+            }
+        }
+    }
+
+    #isToInitializeDatabaseForEngine(modelClass, databaseIdName) {
+        const modelOptions = { ...modelClass._defaultOptions, ...this.options }
+        return modelOptions.databases.includes(databaseIdName)
+    }
+
+    /**
      * Effectively initializes the model in the orm engine used.
      * 
-     * @param {object} Model - The actual model class, used because we append the instance of the model
+     * @param {Model} modelClass - The actual model class, used because we append the instance of the model
      * directly to the class itself so the user can simply make `User.instance.findAll({})...`, this way
      * you don`t need to use `new User()` everytime or `getRepository()` everytime, as long as the application exists
      * you can use the instance of the model and make the queries.
@@ -281,34 +357,33 @@ class Model {
      * @returns {object} - The instance of the model generated by the user. Since the instance is appended to the class itself
      * we do not use it, but it can be quite handy if you need the it.
      */
-    initialize(Model, engineInstance, modelName=null) {
-        if (modelName === null) {
-            modelName = this.constructor.name
-        }
-        handleAbstracts(Model, this)
-        this.#initializeAttributes()
-        this.#initializeOptions()
+    initialize(modelClass, engineInstance, modelName=null) {
+        const databaseIdName = engineInstance.databaseIdName
+        if (this.#isToInitializeDatabaseForEngine(modelClass, databaseIdName)) {
+            if (modelName === null) modelName = this.constructor.name
 
-        const instanceMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(this))
-            .filter(instanceMethod => instanceMethod !== 'constructor').map(instanceMethodName => ({ [instanceMethodName]: this[instanceMethodName]}))
-        
-        const instance = engineInstance.defineModel(modelName, this.attributes, this.options, instanceMethods)
-        if (instance !== null) {
-            Model.instance = instance
+            handleAbstracts(modelClass, this)
+            this.#initializeAttributes()
+            this.#initializeOptions()
 
-            const managers = retrieveManagers(this)
-            if (managers) {
-                for (const [managerName, manager] of Object.entries(managers)) {
-                    manager.instance = instance
-                    manager.engineInstance = engineInstance
-                    Model[managerName] = manager
-                }
+            const instanceMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(this))
+                .filter(instanceMethod => instanceMethod !== 'constructor')
+                .map(instanceMethodName => ({ [instanceMethodName]: this[instanceMethodName]}))
+            
+            const instance = engineInstance.defineModel(modelName, this.attributes, this.options, instanceMethods)
+            if (instance !== null) {
+                modelClass.instances[databaseIdName] = instance
+                
+                this.#initializeManagers(modelClass, engineInstance)
+
+                modelClass.attributes = this.attributes
+                modelClass.options = this.options
+
+                return instance
             }
-            Model.attributes = this.attributes
-            Model.options = this.options
         }
-
-        return instance
+        
+        return null
     }
 }
 

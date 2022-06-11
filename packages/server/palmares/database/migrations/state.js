@@ -83,11 +83,14 @@ const ProjectState = () => {
  * This will make it way easier to make diffs in migrations and the original state itself.
  * 
  * @param {Object} settings - The settings object from the settings file so we have access to the installed apps and all that stuff
+ * @param {string} databaseName - The name of the database that you want to retrieve the migrations from, usually it's 'default'
+ * but since we need to support multiple databases, this can change.
  */
-const getState = (settings, untilMigration=null, fromMigrationIndex=null, toMigrationIndex=null) => {
+function getState(settings, databaseName, untilMigration=null, fromMigrationIndex=null, toMigrationIndex=null) {
     const projectState = ProjectState()
-    let migrations = retrieveMigrations(settings)
+    let migrations = retrieveMigrations(settings, databaseName)
     migrations = reorderMigrations(migrations)
+    
     if (untilMigration !== null) {
         const filteredMigrations = []
         for (const migration of migrations) {

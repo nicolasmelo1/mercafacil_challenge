@@ -10,7 +10,7 @@
  */
 class Action {
     stateForwards(appName, state) {}
-    async run(engineInstance, fromState, toState) {}
+    async run(transaction, engineInstance, fromState, toState) {}
 }
 // ------------------------------------------------------------------------------------------
 /**
@@ -64,6 +64,7 @@ class DeleteModel extends Action {
             this.modelName
         )
     }
+
     async run(transaction, engineInstance, fromState, toState) {
         const fromModel = fromState[this.modelName]
         await engineInstance.removeModelMigration(transaction, fromModel)

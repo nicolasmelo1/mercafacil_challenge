@@ -11,7 +11,7 @@ const getState = require('./state')
  * When we run a migration we need to save in the database that we have run this migration, so this is for creating the table 
  * of the runned migrations, and otherwise create the table in a migration.
  * 
- * @param {Engine} engineInstance - A Engine class instance object.
+ * @param {import('../engines/engine').Engine} engineInstance - A Engine class instance object.
  * @param {object} internalModelsByModelName - An object of internal models by model name, right now the only internal model is ReflowMigration
  * but there can be others
  * 
@@ -35,7 +35,9 @@ async function createPalmaresMigrationsTableAndGetLastMigrationName(engineInstan
     let lastMigrationName = ''
 
     try {
-        lastMigrationName = await PalmaresMigrations.migration.getLastRunMigrationNameOrderedById()
+        lastMigrationName = await PalmaresMigrations.migration.getLastRunMigrationNameOrderedById(
+            engineInstance.databaseIdName
+        )
     } catch (e) {
         console.log(e)
         await engineInstance.transaction(createPalmaresMigrationsTable)
@@ -64,21 +66,45 @@ async function createPalmaresMigrationsTableAndGetLastMigrationName(engineInstan
 const runMigrationFile = async (toEngineInstance, fromEngineInstance, settings, migration, transaction) => {
 
     logger.INFO.RUNNING_MIGRATION(migration.migrationName)
-
+    const databaseIdName = migration.migration.databaseName
     let actionIndex = 0
     for (const action of migration.migration.operations(models, actions)) {
-        const fromState = getState(settings, migration.migrationName, actionIndex, null)
-        const fromStateModelsByModelName = initializedStateModelsByModelName(fromState, fromEngineInstance)
-        const toState = getState(settings, migration.migrationName, null, actionIndex)
-        const toStateModelsByModelName = initializedStateModelsByModelName(toState, toEngineInstance)
-        await action.run(transaction, toEngineInstance, fromStateModelsByModelName, toStateModelsByModelName)
+        const fromState = getState(
+            settings, 
+            databaseIdName, 
+            migration.migrationName, 
+            actionIndex, 
+            null
+        )
+        const fromStateModelsByModelName = initializedStateModelsByModelName(
+            fromState, 
+            fromEngineInstance
+        )
+        const toState = getState(
+            settings, 
+            databaseIdName, 
+            migration.migrationName, 
+            null, 
+            actionIndex
+        )
+        const toStateModelsByModelName = initializedStateModelsByModelName(
+            toState, 
+            toEngineInstance
+        )
+        await action.run(
+            transaction, 
+            toEngineInstance, 
+            fromStateModelsByModelName, 
+            toStateModelsByModelName
+        )
         actionIndex++
     }
 
-    await PalmaresMigrations.instance.create({
-        app: migration.appName, 
-        migrationName: migration.migrationName
-    })
+    await PalmaresMigrations.migration.appendNewMigration(
+        databaseIdName,
+        migration.appName, 
+        migration.migrationName
+    )
 }
 
 /**
@@ -88,43 +114,62 @@ const runMigrationFile = async (toEngineInstance, fromEngineInstance, settings, 
  * the state of the models and then compare to the current state. But you might ask yourself: how the hell do we
  * save the state of the models before they were changed and i have the response: the actual migrations
  * 
- * I've got this idea from django migrations itself that works flawlessly. By running each action in order we can recreate the state of the models and
- * then compare to how it is right now. So we can know what was created, what was renamed and such.
+ * I've got this idea from django migrations itself that works flawlessly. By running each action 
+ * in order we can recreate the state of the models and then compare to how it is right now. 
+ * So we can know what was created, what was renamed and such.
  * 
- * For that to work we CAN'T use the actual actions sequelize gives us, instead we should create our own actions because that would be easier
- * This is because each action will hold what will happen to rebuild the state, also each action will hold the data needed to rebuild the state and to 
- * discard the changes and go backwards.
+ * For that to work we CAN'T use the actual actions sequelize gives us, instead we should create our own actions.
+ * This is because each action will hold what will happen to rebuild the state, also each action will hold the data 
+ * needed to rebuild the state and to discard the changes and go backwards.
  * 
- * That's basically the hole idea of the automatic migrations, and then to run the migrations it's easy we have the actions just need to run each of them.
- * Also be aware that we create the `reflow_migrations` table to store the last runned migrations, this way it is a lot easier for us to work.
+ * That's basically the hole idea of the automatic migrations, and then to run the migrations it's easy: 
+ * we have the actions just need to run each of them.
+ * Also be aware that we create the `palmares_migrations` table to store the last runned migrations, this way 
+ * it is a lot easier for us to work.
  * 
- * This was done so it's easier and less of a pain to work with an ORM within this project. An ORM was needed because it keeps the database underneath the SQL, and 
- * work with raw sql can be a problem since we need to be aware of many underlying that can break the production app and also other security issues like SQL injection.
+ * This was done so it's easier and less of a pain to work with an ORM within this project. An ORM was needed
+ * because it keeps the database underneath the SQL, and work with raw sql can be a problem since we need to be 
+ * aware of many underlying that can break the production app and also other security issues like SQL injection.
  * 
  * @param {object} settings - The settings file that will live in '.src/settings.js'
  */
 async function migrate(settings) {
-    const { engineInstance: toEngineInstance, internalModels } = initialize(settings, [PalmaresMigrations])
-    const { engineInstance: fromEngineInstance } = initialize(settings, [PalmaresMigrations])
+    const toEngineInstances = await initialize(settings, [PalmaresMigrations])
+    const fromEngineInstances = await initialize(settings, [PalmaresMigrations])
 
-    const internalModelsByModelName = {}
-    
-    internalModels.forEach(data => {
-        internalModelsByModelName[data.original.constructor.name] = data
-    })
-    let migrations = retrieveMigrations(settings)
-    migrations = reorderMigrations(migrations)
-    const lastMigrationName = await createPalmaresMigrationsTableAndGetLastMigrationName(toEngineInstance, internalModelsByModelName)
-    
-    // We just filter the migrations that was not run yet this way we will just run the new migrations
-    const lastMigrationIndex = migrations.findIndex(migration => migration.migrationName === lastMigrationName)
-    if (lastMigrationIndex !== -1) {
-        migrations = migrations.filter((_, index) => index > lastMigrationIndex )
-    }
+    const toEngineInstanceEntries = Object.entries(toEngineInstances)
+    for (let i=0; i<toEngineInstanceEntries.length; i++) {
+        const [
+            databaseName, 
+            { engineInstance: toEngineInstance, internalModels }
+        ] = toEngineInstanceEntries[i]
+        const { engineInstance: fromEngineInstance } = fromEngineInstances[databaseName]
+        
+        const internalModelsByModelName = {}
+        internalModels.forEach(data => {
+            internalModelsByModelName[data.original.constructor.name] = data
+        })
+        
+        let migrations = retrieveMigrations(settings, databaseName)
+        migrations = reorderMigrations(migrations)
+        const lastMigrationName = await createPalmaresMigrationsTableAndGetLastMigrationName(toEngineInstance, internalModelsByModelName)
+        
+        // We just filter the migrations that was not run yet this way we will just run the new migrations
+        const lastMigrationIndex = migrations.findIndex(migration => migration.migrationName === lastMigrationName)
+        if (lastMigrationIndex !== -1) {
+            migrations = migrations.filter((_, index) => index > lastMigrationIndex )
+        }
 
-    for (const migration of migrations) {
-        await toEngineInstance.initializeMigrations()
-        await toEngineInstance.transaction(runMigrationFile, toEngineInstance, fromEngineInstance, settings, migration)
+        for (const migration of migrations) {
+            await toEngineInstance.initializeMigrations()
+            await toEngineInstance.transaction(
+                runMigrationFile, 
+                toEngineInstance, 
+                fromEngineInstance, 
+                settings, 
+                migration
+            )
+        }
     }
 
     logger.INFO.FINISHED_MIGRATION()

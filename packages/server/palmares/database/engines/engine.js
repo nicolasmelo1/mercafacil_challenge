@@ -3,18 +3,19 @@
  */
 
 const models = require('../models')
-
-class DatabaseConnectionError extends Error {}
-class UnableToDefineModelError extends Error {}
-
+const exceptions = require('../exceptions')
 
 class Engine {
-    constructor({engine, databaseName, url=null, username=null, password=null, host=null, port=null, extraOptions={}}) {
+    engineName = ''
+    databaseIdName = 'default'
+
+    constructor({engine, databaseIdName, databaseName, url=null, username=null, password=null, host=null, port=null, extraOptions={}}) {
+        this.databaseIdName = databaseIdName
         this.engineInstance = null
     }
 
     defineModel(...attribute) {
-        throw new UnableToDefineModelError('Could not define the model, please make sure you implement this method in your engine')
+        throw new exceptions.UnableToDefineModelError('Could not define the model, please make sure you implement this method in your engine')
     }
     
     /**
@@ -64,7 +65,9 @@ class Engine {
     }
     
     async testConnection() {}
-    isConnected = () => false
+    isConnected() {
+        return false
+    }
     async close() {}
 
     /**

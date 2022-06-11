@@ -24,13 +24,27 @@ const MIDDLEWARE = [
 ]
 
 const DATABASE = {   
-    default: {
+    varejao: {
         engine: 'postgres',
         databaseName: 'postgres',
         username: 'postgres', 
         password: '',
         host: 'localhost',
         port: 5432,
+        extraOptions: {
+            logging: false,
+            query: { 
+                raw: true
+            }
+        }
+    },
+    macapa: {
+        engine: 'mysql',
+        databaseName: 'macapa',
+        username: 'admin', 
+        password: 'admin',
+        host: 'localhost',
+        port: 3306,
         extraOptions: {
             logging: false,
             query: { 

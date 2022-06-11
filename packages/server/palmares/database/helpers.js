@@ -14,7 +14,7 @@ function camelToSnakeCase(string) {
 }
 
 
-function retrieveMigrations(settings) {
+function retrieveMigrations(settings, databaseName) {
     let migrations = []
     for (let i=0; i< settings.INSTALLED_APPS.length; i++) {
         const appName = settings.INSTALLED_APPS[i]
@@ -25,7 +25,8 @@ function retrieveMigrations(settings) {
                     const migration = require(path.join(fullPath,file))
                     const isMigrationFileAValidMigration = typeof migration === 'object' && 
                         migration?.dependency !== undefined && 
-                        migration?.operations !== undefined
+                        migration?.operations !== undefined &&
+                        migration?.databaseName === databaseName
                     if (isMigrationFileAValidMigration) {
                         migrations.push({
                             appName: appName,
@@ -59,6 +60,7 @@ function retrieveModels(settings) {
                 models = Object.values(require(fullPath))
             }
         }
+
         models.forEach(model => {
             modules.push({ 
                 appName: appName,
@@ -79,25 +81,35 @@ function retrieveModels(settings) {
  * 
  * @returns {Object} - Returns an object similar to stateModels besides that this will be an object of the initialized models
  */
-const initializedStateModelsByModelName = (stateModels, engineInstance) => {
+function initializedStateModelsByModelName(stateModels, engineInstance) {
     const newStateModels = {}
     // reset the defined models so it doesn't clash with the original models.
     engineInstance.resetModels()
+    const stateModelEntries = Object.entries(stateModels)
 
-    Object.entries(stateModels).forEach(([stateModelName, stateModel]) => {
-        class StateModel extends models.Model {
-            attributes = stateModel.attributes
+    for (const [stateModelName, stateModel] of stateModelEntries) {
+        const isModelStateFromCurrentEngine = stateModel.options.databases.includes(engineInstance.databaseIdName)
+        if (isModelStateFromCurrentEngine) {
+            class StateModel extends models.Model {
+                attributes = stateModel.attributes
 
-            options = stateModel.options
+                options = stateModel.options
+            }
+
+            const stateModelInstance = new StateModel()
+            const initializedInstance = stateModelInstance.initialize(
+                StateModel, engineInstance, `${stateModelName}`
+            )
+            const isInitializedInstanceValid = ![null, undefined].includes(initializedInstance)
+            if (isInitializedInstanceValid) {
+                newStateModels[stateModelName] = {
+                    original: StateModel,
+                    initialized: initializedInstance
+                }
+            }
         }
-
-        const stateModelInstance = new StateModel()
-        stateModelInstance.initialize(StateModel, engineInstance, `${stateModelName}`)
-        newStateModels[stateModelName] = {
-            original: StateModel,
-            initialized: StateModel.instance
-        }
-    })
+    }
+    
     return newStateModels
 }
 

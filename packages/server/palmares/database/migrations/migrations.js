@@ -4,10 +4,13 @@ class PalmaresMigrationsManager extends models.Manager {
     /**
      * Gets the migration that had runned before, this is the last one that was generated.
      * 
+     * @param {string} databaseName - The name of the database that we want to get the last migration
+     * from.
+     * 
      * @returns {Promise<string>} - Retrieves the last migration name that was runned.
      */
-    async getLastRunMigrationNameOrderedById() {
-        const lastMigration = await this.instance.findOne({
+    async getLastRunMigrationNameOrderedById(databaseName) {
+        const lastMigration = await this.getInstance(databaseName).findOne({
             raw: true,
             attributes: ['migrationName'],
             order: [['id', 'DESC']]
@@ -18,6 +21,20 @@ class PalmaresMigrationsManager extends models.Manager {
         } else {
             return ''
         }
+    }
+
+    /**
+     * After a new migration runs we need to save on the database that this migration had runned.
+     * 
+     * @param {string} databaseName - The name of the database that we want to save the last migration.
+     * @param {string} appName - The name of the app were this model was created.
+     * @param {string} migrationName - The name of the migration that we want to save.
+     */
+    async appendNewMigration(databaseName, appName, migrationName) {
+        await this.getInstance(databaseName).create({
+            app: appName, 
+            migrationName: migrationName
+        })
     }
 }
 

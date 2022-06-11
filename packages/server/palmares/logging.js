@@ -14,14 +14,14 @@ const logger = {
         STOPPING_APPLICATION: (appName) => {
             console.info(`${defaultLog()} \x1b[36mINFO\x1b[0m Stopping application ${appName}`)
         },
-        LOADING_DATABASE: () => {
-            console.info(`${defaultLog()} \x1b[36mINFO\x1b[0m Loading models to the engine`)
+        LOADING_DATABASE: (databaseName) => {
+            console.info(`${defaultLog()} \x1b[36mINFO\x1b[0m Loading all models from the database ${databaseName} to the engine.`)
         },
         CLOSING_DATABASE: () => {
             console.info(`${defaultLog()} \x1b[36mINFO\x1b[0m Closing database connection.`)
         },
-        LOADED_DATABASE: () => {
-            console.info(`${defaultLog()} \x1b[36mINFO\x1b[0m The engine loaded your models`)
+        LOADED_DATABASE: (databaseName) => {
+            console.info(`${defaultLog()} \x1b[36mINFO\x1b[0m The engine loaded your models for database named ${databaseName}.`)
         },
         CREATED_MIGRATION: (fileName, appName) => {
             console.info(`${defaultLog()} \x1b[36mINFO\x1b[0m Successfully generated migration ${fileName} in app ${appName}`)
